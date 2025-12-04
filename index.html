@@ -1,80 +1,257 @@
-<!DOCTYPE html>
+<!-- index.html для TGSpotter WebApp (Telegram + Supabase) -->
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My Telegram WebApp</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TGSpotter — Проверка канала</title>
+
+  <!-- Telegram WebApp -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
+  <!-- Supabase JS (frontend, anon key) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/supabase.min.js"></script>
+
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 20px;
-      background: var(--tg-theme-bg-color, #f2f3f5);
-      color: var(--tg-theme-text-color, #000);
+    :root{
+      --bg: #0f1724;
+      --card: #0b1220;
+      --muted: #9aa4b2;
+      --accent: #06b6d4;
+      --glass: rgba(255,255,255,0.03);
+      color-scheme: dark;
     }
-
-    .card {
-      padding: 20px;
-      background: var(--tg-theme-secondary-bg-color, #fff);
-      border-radius: 16px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
-    }
-
-    button {
-      width: 100%;
-      padding: 16px;
-      font-size: 16px;
-      border: none;
-      border-radius: 12px;
-      background: var(--tg-theme-button-color, #0084ff);
-      color: var(--tg-theme-button-text-color, #fff);
-      cursor: pointer;
-    }
+    html,body{height:100%;margin:0;background:var(--bg);font-family:Inter,system-ui,Arial,sans-serif;color:#e6eef6}
+    .container{max-width:820px;margin:28px auto;padding:20px}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+    header h1{font-size:20px;margin:0}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02));padding:18px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.6);margin-bottom:14px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type="text"], input[type="email"]{width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:var(--card);color:#fff;box-sizing:border-box}
+    .row{display:flex;gap:10px;align-items:center}
+    .btn{display:inline-block;padding:12px 16px;border-radius:10px;border:0;background:var(--accent);color:#042024;font-weight:600;cursor:pointer}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .muted{color:var(--muted);font-size:13px}
+    .small{font-size:13px;color:var(--muted)}
+    .hidden{display:none}
+    footer{margin-top:8px;color:var(--muted);font-size:13px}
+    .inline{display:inline-block}
   </style>
 </head>
 <body>
+  <div class="container">
+    <header>
+      <img src="" id="logo" alt="TGSpotter" width="36" height="36" style="border-radius:8px;background:linear-gradient(135deg,#023047,#06b6d4)">
+      <h1>TGSpotter — проверка канала</h1>
+    </header>
 
-  <h2>Telegram WebApp</h2>
+    <!-- Карточка статуса пользователя -->
+    <div class="card" id="user-card">
+      <div id="user-info" class="row">
+        <div style="flex:1">
+          <div id="user-status" class="small">Загрузка данных...</div>
+          <div id="user-detail" class="muted">Открой WebApp в Telegram для авт. авторизации или войди через email</div>
+        </div>
+        <div style="min-width:160px;text-align:right">
+          <button id="login-btn" class="btn">Войти (email)</button>
+          <button id="logout-btn" class="btn btn-ghost hidden">Выйти</button>
+        </div>
+      </div>
+    </div>
 
-  <div class="card">
-    <p id="info">Загрузка...</p>
+    <!-- Форма запроса анализа -->
+    <div class="card">
+      <label for="channel-input">Ссылка или @username канала</label>
+      <input id="channel-input" type="text" placeholder="@mychannel или https://t.me/mychannel" />
+
+      <div style="height:10px"></div>
+
+      <label for="notes">Комментарий (необязательно)</label>
+      <input id="notes" type="text" placeholder="Например: таргет на RU аудиторию" />
+
+      <div style="height:10px"></div>
+
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <div class="small">Цена анализа: <b id="price">5.00 EUR</b></div>
+          <div class="muted" id="price-note">Оплата через Stripe (настроим позже)</div>
+        </div>
+
+        <div>
+          <button id="order-btn" class="btn">Заказать анализ</button>
+        </div>
+      </div>
+
+      <div id="order-result" class="muted small" style="margin-top:10px"></div>
+    </div>
+
+    <footer>
+      <div>© TGSpotter</div>
+    </footer>
   </div>
 
-  <button onclick="sendData()">Продолжить</button>
-
   <script>
-    // Инициализация Telegram WebApp
-    const tg = window.Telegram.WebApp;
+    /* ========== ЗАМЕНИТЕ ЭТИ ПЕРЕМЕННЫЕ ========== */
+    // Вставь сюда URL и ANON_KEY из Supabase Project → Settings → API
+    const SUPABASE_URL = 'https://aidjwvqsfyohbwexkggi.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpZGp3dnFzZnlvaGJ3ZXhrZ2dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4NzU1NzcsImV4cCI6MjA4MDQ1MTU3N30.kwo-cmNzrRX_IKVulAGlrIdSa4uGPnfrudBYs522RxE';
+    // Адрес backend функции (создадим позже). Пока можно указать пустую строку.
+    const CREATE_ANALYSIS_ENDPOINT = ''; // например: https://your-domain/functions/create-analysis
 
-    tg.expand(); // развернуть на весь экран
+    /* ========== Инициализация Supabase (frontend) ========== */
+    const supabase = supabaseJs.createClient
+      ? supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    const user = tg.initDataUnsafe?.user;
-
-    if (user) {
-      document.getElementById("info").innerHTML = `
-        <b>Вы авторизованы:</b><br>
-        ID: ${user.id}<br>
-        Имя: ${user.first_name}
-      `;
-    } else {
-      document.getElementById("info").innerHTML = `
-        <b>WebApp открыт в браузере.</b><br>
-        Авторизация невозможна.<br><br>
-        Открой через Telegram.
-      `;
+    /* ========== Telegram WebApp init ========== */
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      try { tg.expand(); } catch(e) {}
     }
 
-    function sendData() {
-      tg.sendData(JSON.stringify({
-        action: "continue",
-        user_id: user?.id || null
-      }));
-      tg.close();
+    /* UI элементы */
+    const loginBtn = document.getElementById('login-btn');
+    const logoutBtn = document.getElementById('logout-btn');
+    const userStatus = document.getElementById('user-status');
+    const userDetail = document.getElementById('user-detail');
+    const orderBtn = document.getElementById('order-btn');
+    const channelInput = document.getElementById('channel-input');
+    const notesInput = document.getElementById('notes');
+    const orderResult = document.getElementById('order-result');
+    const priceEl = document.getElementById('price');
+
+    /* Цена анализа — можно менять */
+    const PRICE_EUR = 5.00;
+    priceEl.textContent = PRICE_EUR.toFixed(2) + ' EUR';
+
+    /* ========== Функции аутентификации (Supabase Email Magic Link) ========== */
+    async function checkSession() {
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session;
+      if (session) {
+        showUser(session.user);
+        return session.user;
+      } else {
+        // Если открыто в Telegram — получим initDataUnsafe.user
+        const tuser = tg?.initDataUnsafe?.user;
+        if (tuser) {
+          userStatus.textContent = 'Авторизован через Telegram';
+          userDetail.textContent = `TG ID: ${tuser.id} — без email (рекомендуем привязать аккаунт)`;
+          loginBtn.classList.remove('hidden');
+          logoutBtn.classList.add('hidden');
+          return null;
+        }
+        userStatus.textContent = 'Не вошли';
+        userDetail.textContent = 'Войдите через email или откройте в Telegram';
+        loginBtn.classList.remove('hidden');
+        logoutBtn.classList.add('hidden');
+        return null;
+      }
     }
+
+    function showUser(user) {
+      userStatus.textContent = `Вошли как: ${user.email || user.user_metadata?.full_name || user.id}`;
+      userDetail.textContent = `UID: ${user.id}`;
+      loginBtn.classList.add('hidden');
+      logoutBtn.classList.remove('hidden');
+    }
+
+    loginBtn.addEventListener('click', async () => {
+      const email = prompt('Введите email для входа (magic link):');
+      if (!email) return;
+      const { error } = await supabase.auth.signInWithOtp({ email });
+      if (error) {
+        alert('Ошибка отправки ссылки: ' + error.message);
+      } else {
+        alert('Письмо со ссылкой отправлено. Откройте почту и перейдите по ссылке.');
+      }
+    });
+
+    logoutBtn.addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      userStatus.textContent = 'Вышли';
+      userDetail.textContent = 'Войдите через email или откройте в Telegram';
+      loginBtn.classList.remove('hidden');
+      logoutBtn.classList.add('hidden');
+    });
+
+    /* Обновлять статус при загрузке */
+    checkSession();
+
+    /* ========== Создать запись анализа (frontend) ========== */
+    orderBtn.addEventListener('click', async () => {
+      orderResult.textContent = '';
+      const channel = channelInput.value.trim();
+      const notes = notesInput.value.trim();
+      if (!channel) {
+        orderResult.textContent = 'Введите @username или ссылку на канал.';
+        return;
+      }
+
+      // Подготовим payload
+      // если пользователь в Supabase, возьмём его uid, иначе используем Telegram id (если есть)
+      let userId = null;
+      const s = await supabase.auth.getSession();
+      if (s?.data?.session) userId = s.data.session.user.id;
+      const tUser = tg?.initDataUnsafe?.user;
+      if (!userId && tUser) {
+        // временно сохраняем TG id в поле user_id как строку 'tg:<id>'
+        userId = 'tg:' + tUser.id;
+      }
+
+      // Если нет userId, попросим войти
+      if (!userId) {
+        orderResult.textContent = 'Пожалуйста, войдите через email или откройте WebApp в Telegram.';
+        return;
+      }
+
+      // Сформируем объект запроса — мы будем шлём на серверную функцию (Edge Function).
+      const body = {
+        user_id: userId,
+        tg_channel: channel,
+        notes,
+        price_cents: Math.round(PRICE_EUR * 100),
+        currency: 'EUR'
+      };
+
+      // Если у тебя пока нет backend — ниже есть альтернативы:
+      // 1) можно временно сохранить запрос напрямую в Supabase via anon key (но это небезопасно),
+      // 2) лучше дождаться, пока мы настроим Edge Function и Stripe — тогда ты просто вставишь URL.
+
+      if (!CREATE_ANALYSIS_ENDPOINT) {
+        orderResult.textContent = 'Backend не настроен — дождитесь следующего шага, где я покажу, как добавить функцию.';
+        return;
+      }
+
+      orderBtn.disabled = true;
+      orderBtn.textContent = 'Отправляем...';
+
+      try {
+        // Отправляем запрос на backend (заменишь CREATE_ANALYSIS_ENDPOINT позже)
+        const res = await fetch(CREATE_ANALYSIS_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+            // JWT токен мы отправим в следующих шагах (supabase session.access_token)
+          },
+          body: JSON.stringify(body)
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || 'Ошибка сервера');
+
+        orderResult.textContent = 'Анализ принят в обработку. Статус: ' + (json.status || 'pending');
+      } catch (err) {
+        orderResult.textContent = 'Ошибка: ' + err.message;
+      } finally {
+        orderBtn.disabled = false;
+        orderBtn.textContent = 'Заказать анализ';
+      }
+    });
+
+    /* ========== Для разработки: быстро проверить, что UI работает ========== */
+    // Если открываешь страницу в браузере (не в Telegram), то tg может быть undefined.
+    // Всё равно UI будет работать, но авторизация через Telegram не доступна.
   </script>
-
 </body>
 </html>
